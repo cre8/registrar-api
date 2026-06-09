@@ -1,0 +1,2124 @@
+openapi: 3.1.0
+info:
+  title: Wallet-Relying Party Registrar Public Read API
+  version: 0.1.0
+  summary: Public read-only registrar API for Wallet-Relying Party transparency and monitoring.
+  description: |
+    This OpenAPI specification defines the public read-only API of a national Wallet-Relying Party Registrar.
+
+    The API is designed as a certificate-derived transparency API. The authoritative public transaction source is the
+    set of published Wallet-Relying Party Access Certificates, Wallet-Relying Party Registration Certificates, and their
+    certificate status events. The monitor database exposed through this API is a derived projection from those
+    certificate transactions.
+
+    The API supports:
+      - public discovery of registered Wallet-Relying Parties;
+      - public search across intended uses, requested credentials, and requested claims;
+      - deduplicated intended-use monitoring;
+      - certificate evidence retrieval;
+      - certificate-event replay for external monitor reconstruction;
+      - point-in-time reconstruction by using the `at` query parameter;
+      - JWS JSON Serialization for authoritative signed registrar statements.
+
+    This API intentionally contains no write operations.
+  contact:
+    name: Registrar API Maintainers
+  license:
+    name: TBD
+    identifier: TBD
+
+jsonSchemaDialect: https://spec.openapis.org/oas/3.1/dialect/base
+
+servers:
+  - url: https://registrar.example.gov
+    description: Example national registrar
+
+tags:
+  - name: Metadata
+    description: Registry metadata and API discovery.
+  - name: Wallet-Relying Parties
+    description: Public read operations for Wallet-Relying Parties.
+  - name: Intended Uses
+    description: Deduplicated intended-use monitoring resources.
+  - name: Requested Data
+    description: Search across requested credentials and claims.
+  - name: Provided Attestations
+    description: Search across attestations that registered entities intend to provide.
+  - name: Certificates
+    description: Certificate evidence resources.
+  - name: Certificate Events
+    description: Replayable certificate-derived transaction history.
+  - name: Statements
+    description: Authoritative JWS-signed registrar statements.
+  - name: Statistics
+    description: Optional public aggregate monitoring statistics.
+
+security: []
+
+paths:
+  /.well-known/registrar-api:
+    get:
+      operationId: getRegistrarMetadata
+      tags: [Metadata]
+      summary: Get registrar API metadata
+      description: Returns machine-readable metadata about the registrar API and its supported capabilities.
+      responses:
+        "200":
+          description: Registrar metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistryMetadata"
+              examples:
+                metadata:
+                  value:
+                    registrar_id: "DE-REGISTRAR-001"
+                    country: "DE"
+                    api_base_url: "https://registrar.example.gov"
+                    openapi_url: "https://registrar.example.gov/openapi.yaml"
+                    human_readable_registry_url: "https://registrar.example.gov/register"
+                    api_version: "0.1.0"
+                    latest_registry_update: "2026-06-09T08:30:00Z"
+                    supported_signing_algorithms: ["ES256", "PS256"]
+                    supported_statement_serializations: ["jws-json-flattened", "jws-json-general"]
+                    supported_credential_formats: ["dc+sd-jwt", "mso_mdoc"]
+                    jwks_uri: "https://registrar.example.gov/.well-known/jwks.json"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /openapi.yaml:
+    get:
+      operationId: getOpenApiYaml
+      tags: [Metadata]
+      summary: Get OpenAPI specification
+      description: Returns this OpenAPI specification as YAML.
+      responses:
+        "200":
+          description: OpenAPI YAML document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+
+  /wrps:
+    get:
+      operationId: searchWalletRelyingParties
+      tags: [Wallet-Relying Parties]
+      summary: Search Wallet-Relying Parties
+      description: |
+        Searches Wallet-Relying Parties. This endpoint returns compact, paginated summaries and links to
+        authoritative signed statements and certificate evidence.
+
+        Full intended uses are not embedded by default because a single Wallet-Relying Party may have hundreds of
+        intended uses. Use `/wrps/{wrp_id}/intended-uses` or `/intended-uses` for paginated intended-use retrieval.
+      parameters:
+        - $ref: "#/components/parameters/Q"
+        - $ref: "#/components/parameters/Identifier"
+        - $ref: "#/components/parameters/IdentifierType"
+        - name: name
+          in: query
+          description: Exact or partial legal name, trade name, or service name.
+          schema:
+            type: string
+        - name: country
+          in: query
+          description: ISO 3166-1 alpha-2 country code.
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 2
+        - $ref: "#/components/parameters/Entitlement"
+        - $ref: "#/components/parameters/SubEntitlement"
+        - name: privacy_policy_url
+          in: query
+          description: Exact privacy policy URL.
+          schema:
+            type: string
+            format: uri
+        - $ref: "#/components/parameters/UsesIntermediary"
+        - $ref: "#/components/parameters/IntermediaryIdentifier"
+        - $ref: "#/components/parameters/Status"
+        - $ref: "#/components/parameters/At"
+        - $ref: "#/components/parameters/UpdatedSince"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated Wallet-Relying Party search results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletRelyingPartySearchResponse"
+              examples:
+                searchByName:
+                  summary: Search by company name
+                  value:
+                    data:
+                      - wrp_id: "wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                        display_name: "Example Company"
+                        legal_name: "Example Company GmbH"
+                        country: "DE"
+                        identifiers:
+                          - type: "LEI"
+                            value: "529900T8BM49AURSDO55"
+                        entitlements:
+                          - "https://uri.etsi.org/19475/Entitlement/Service_Provider"
+                        status: "active"
+                        intended_use_count: 327
+                        active_intended_use_count: 301
+                        links:
+                          self: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                          intended_uses: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55/intended-uses"
+                          certificates: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55/certificates"
+                          statements: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55/statements"
+                    pagination:
+                      limit: 25
+                      next_cursor: null
+        default:
+          $ref: "#/components/responses/Error"
+
+  /wrps/{wrp_id}:
+    get:
+      operationId: getWalletRelyingParty
+      tags: [Wallet-Relying Parties]
+      summary: Get Wallet-Relying Party detail
+      description: |
+        Returns a public Wallet-Relying Party profile. The response does not embed the full intended-use list by default.
+        It includes counters and links to paginated intended-use, certificate, event, and statement resources.
+
+        Public responses must exclude non-public registration data such as physical address where public exposure is not permitted.
+      parameters:
+        - $ref: "#/components/parameters/WrpId"
+        - $ref: "#/components/parameters/At"
+        - name: include
+          in: query
+          description: Optional lightweight expansions. Full intended-use expansion is intentionally not supported.
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [intended_use_summary, certificate_summary]
+          style: form
+          explode: false
+      responses:
+        "200":
+          description: Wallet-Relying Party public detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletRelyingParty"
+              examples:
+                detail:
+                  summary: WRP detail response
+                  value:
+                    wrp_id: "wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                    display_name: "Example Company"
+                    legal_name: "Example Company GmbH"
+                    country: "DE"
+                    identifiers:
+                      - type: "LEI"
+                        value: "529900T8BM49AURSDO55"
+                    info_uri: "https://example.com/info"
+                    support_uri: ["https://example.com/support"]
+                    privacy_policy: "https://example.com/privacy-policy"
+                    service_descriptions:
+                      - lang: "en-US"
+                        value: "Awesome Service by Example Company"
+                      - lang: "de-DE"
+                        value: "Super Dienst von Example Company"
+                    is_public_sector_body: false
+                    entitlements:
+                      - "https://uri.etsi.org/19475/Entitlement/Service_Provider"
+                    status: "active"
+                    intended_use_count: 327
+                    active_intended_use_count: 301
+                    first_registered_at: "2025-01-10T10:00:00Z"
+                    last_updated_at: "2026-06-01T09:00:00Z"
+                    links:
+                      self: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                      intended_uses: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55/intended-uses"
+                      certificates: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55/certificates"
+                      certificate_events: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55/certificate-events"
+                      statements: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55/statements"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /wrps/{wrp_id}/intended-uses:
+    get:
+      operationId: listWalletRelyingPartyIntendedUses
+      tags: [Intended Uses]
+      summary: List intended uses of one Wallet-Relying Party
+      description: Returns paginated, deduplicated intended uses for one Wallet-Relying Party.
+      parameters:
+        - $ref: "#/components/parameters/WrpId"
+        - $ref: "#/components/parameters/At"
+        - $ref: "#/components/parameters/IntendedUseStatus"
+        - $ref: "#/components/parameters/CredentialFormat"
+        - $ref: "#/components/parameters/CredentialType"
+        - $ref: "#/components/parameters/ClaimPath"
+        - $ref: "#/components/parameters/RegisteredFrom"
+        - $ref: "#/components/parameters/RegisteredTo"
+        - $ref: "#/components/parameters/RevokedFrom"
+        - $ref: "#/components/parameters/RevokedTo"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated intended uses.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntendedUseSearchResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /wrps/{wrp_id}/certificates:
+    get:
+      operationId: listWalletRelyingPartyCertificates
+      tags: [Certificates]
+      summary: List certificates of one Wallet-Relying Party
+      description: Returns current and historic access and registration certificates for one Wallet-Relying Party.
+      parameters:
+        - $ref: "#/components/parameters/WrpId"
+        - $ref: "#/components/parameters/CertificateType"
+        - $ref: "#/components/parameters/CertificateStatus"
+        - $ref: "#/components/parameters/ValidAt"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated certificates.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateSearchResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /wrps/{wrp_id}/certificate-events:
+    get:
+      operationId: listWalletRelyingPartyCertificateEvents
+      tags: [Certificate Events]
+      summary: List certificate events of one Wallet-Relying Party
+      description: Returns replayable certificate events for one Wallet-Relying Party.
+      parameters:
+        - $ref: "#/components/parameters/WrpId"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/CertificateType"
+        - $ref: "#/components/parameters/CertificateEventType"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated certificate events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateEventSearchResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /wrps/{wrp_id}/statements:
+    get:
+      operationId: listWalletRelyingPartyStatements
+      tags: [Statements]
+      summary: List signed statements of one Wallet-Relying Party
+      description: Returns statement summaries for one Wallet-Relying Party.
+      parameters:
+        - $ref: "#/components/parameters/WrpId"
+        - name: statement_type
+          in: query
+          schema:
+            $ref: "#/components/schemas/StatementType"
+        - $ref: "#/components/parameters/At"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated signed statement summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatementSearchResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /intended-uses:
+    get:
+      operationId: searchIntendedUses
+      tags: [Intended Uses]
+      summary: Search deduplicated intended uses
+      description: |
+        Searches canonical intended uses derived from registration certificates. Results are deduplicated by
+        `intended_use_fingerprint` so the same intended use does not appear multiple times just because it was included
+        in multiple registration certificates.
+      parameters:
+        - name: wrp_id
+          in: query
+          description: Stable Wallet-Relying Party identifier.
+          schema:
+            type: string
+        - name: wrp_identifier
+          in: query
+          description: Official or business registration number.
+          schema:
+            type: string
+        - name: purpose_q
+          in: query
+          description: Free-text search over purpose descriptions.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/CredentialFormat"
+        - $ref: "#/components/parameters/CredentialType"
+        - $ref: "#/components/parameters/ClaimPath"
+        - name: claim_name
+          in: query
+          description: Claim name within the credential selected by `credential_type` (for example, `age_over_18` within PID).
+          schema:
+            type: string
+        - name: privacy_policy_url
+          in: query
+          description: Exact privacy policy URL.
+          schema:
+            type: string
+            format: uri
+        - $ref: "#/components/parameters/Entitlement"
+        - $ref: "#/components/parameters/SubEntitlement"
+        - $ref: "#/components/parameters/IntermediaryIdentifier"
+        - $ref: "#/components/parameters/IntendedUseStatus"
+        - $ref: "#/components/parameters/RegisteredFrom"
+        - $ref: "#/components/parameters/RegisteredTo"
+        - $ref: "#/components/parameters/RevokedFrom"
+        - $ref: "#/components/parameters/RevokedTo"
+        - $ref: "#/components/parameters/At"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated intended-use search results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntendedUseSearchResponse"
+              examples:
+                searchByPid:
+                  summary: Search by PID credential type
+                  value:
+                    data:
+                      - intended_use_id: "iu_bafkreiaexample"
+                        intended_use_fingerprint: "sha-256:5f2c..."
+                        wrp_id: "wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                        wrp_display_name: "Example Company"
+                        purpose:
+                          - lang: "en-US"
+                            value: "Required for checking the minimum age"
+                        requested_credentials:
+                          - format: "dc+sd-jwt"
+                            meta:
+                              vct_values: ["urn:eudi:pid:de:1"]
+                            claims:
+                              - path: ["age_equal_or_over", "18"]
+                        status: "active"
+                        first_registered_at: "2025-01-10T10:00:00Z"
+                        last_confirmed_at: "2025-02-01T10:00:00Z"
+                        supporting_certificate_count: 2
+                        current_supporting_certificate_count: 1
+                        links:
+                          self: "/intended-uses/iu_bafkreiaexample"
+                          certificates: "/intended-uses/iu_bafkreiaexample/certificates"
+                          certificate_events: "/intended-uses/iu_bafkreiaexample/certificate-events"
+                          signed_statement: "/statements/stmt_123"
+                    pagination:
+                      limit: 25
+                      next_cursor: "eyJzZXEiOjEwMDI1fQ"
+                searchByPidAgeOver18:
+                  summary: Search by age-over-18 claim within PID
+                  value:
+                    data:
+                      - intended_use_id: "iu_age_18_alcohol"
+                        intended_use_fingerprint: "sha-256:9ae1..."
+                        wrp_id: "wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                        wrp_display_name: "Example Company"
+                        purpose:
+                          - lang: "en-US"
+                            value: "Age verification for alcohol purchase"
+                        requested_credentials:
+                          - format: "dc+sd-jwt"
+                            meta:
+                              vct_values: ["urn:eudi:pid:de:1"]
+                            claims:
+                              - path: ["age_equal_or_over", "18"]
+                          - format: "mso_mdoc"
+                            meta:
+                              doctype_value: "eu.europa.ec.eudi.pid.1"
+                            claims:
+                              - path: ["age_over_18"]
+                        status: "active"
+                        first_registered_at: "2025-01-10T10:00:00Z"
+                        last_confirmed_at: "2025-02-01T10:00:00Z"
+                        supporting_certificate_count: 2
+                        current_supporting_certificate_count: 2
+                        links:
+                          self: "/intended-uses/iu_age_18_alcohol"
+                          certificates: "/intended-uses/iu_age_18_alcohol/certificates"
+                          certificate_events: "/intended-uses/iu_age_18_alcohol/certificate-events"
+                          signed_statement: "/statements/stmt_age_18_alcohol"
+                    pagination:
+                      limit: 25
+                      next_cursor: null
+        default:
+          $ref: "#/components/responses/Error"
+
+  /intended-uses/{intended_use_id}:
+    get:
+      operationId: getIntendedUse
+      tags: [Intended Uses]
+      summary: Get intended-use detail
+      description: Returns one canonical intended use, including lifecycle metadata and evidence links.
+      parameters:
+        - $ref: "#/components/parameters/IntendedUseId"
+        - $ref: "#/components/parameters/At"
+      responses:
+        "200":
+          description: Intended-use detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntendedUse"
+              examples:
+                detail:
+                  summary: Intended use detail
+                  value:
+                    intended_use_id: "iu_age_18_alcohol"
+                    intended_use_fingerprint: "sha-256:9ae1..."
+                    wrp_id: "wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                    wrp_display_name: "Example Company"
+                    purpose:
+                      - lang: "en-US"
+                        value: "Age verification for alcohol purchase"
+                      - lang: "de-DE"
+                        value: "Altersprüfung beim Kauf von Alkohol"
+                    requested_credentials:
+                      - format: "dc+sd-jwt"
+                        meta:
+                          vct_values: ["urn:eudi:pid:de:1"]
+                        claims:
+                          - path: ["age_equal_or_over", "18"]
+                      - format: "mso_mdoc"
+                        meta:
+                          doctype_value: "eu.europa.ec.eudi.pid.1"
+                        claims:
+                          - path: ["age_over_18"]
+                    privacy_policy: "https://example.com/privacy-policy"
+                    entitlements:
+                      - "https://uri.etsi.org/19475/Entitlement/Service_Provider"
+                    status: "active"
+                    first_registered_at: "2025-01-10T10:00:00Z"
+                    last_confirmed_at: "2025-02-01T10:00:00Z"
+                    revoked_at: null
+                    valid_from: "2025-01-10T10:00:00Z"
+                    valid_until: "2026-01-10T10:00:00Z"
+                    supporting_certificate_ids: ["cert_wrprc_A", "cert_wrprc_B"]
+                    current_supporting_certificate_ids: ["cert_wrprc_B"]
+                    links:
+                      self: "/intended-uses/iu_age_18_alcohol"
+                      wrp: "/wrps/wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                      certificates: "/intended-uses/iu_age_18_alcohol/certificates"
+                      certificate_events: "/intended-uses/iu_age_18_alcohol/certificate-events"
+                      signed_statement: "/statements/stmt_age_18_alcohol"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /intended-uses/{intended_use_id}/certificates:
+    get:
+      operationId: listIntendedUseCertificates
+      tags: [Intended Uses, Certificates]
+      summary: List certificates supporting an intended use
+      description: Returns certificates that support or historically supported the canonical intended use.
+      parameters:
+        - $ref: "#/components/parameters/IntendedUseId"
+        - $ref: "#/components/parameters/CertificateStatus"
+        - $ref: "#/components/parameters/At"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated certificate summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateSearchResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /intended-uses/{intended_use_id}/certificate-events:
+    get:
+      operationId: listIntendedUseCertificateEvents
+      tags: [Intended Uses, Certificate Events]
+      summary: List certificate events for an intended use
+      description: Returns certificate events that changed or confirmed the lifecycle of this intended use.
+      parameters:
+        - $ref: "#/components/parameters/IntendedUseId"
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/CertificateEventType"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated certificate events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateEventSearchResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /requested-credentials:
+    get:
+      operationId: searchRequestedCredentials
+      tags: [Requested Data]
+      summary: Search requested credentials
+      description: |
+        Searches credential types and claims that Wallet-Relying Parties registered to request.
+
+        Claims are always interpreted within a credential scope. If `claim_path` is used, clients should also set
+        `credential_type` to avoid ambiguous cross-credential claim matching.
+      parameters:
+        - $ref: "#/components/parameters/CredentialFormat"
+        - $ref: "#/components/parameters/CredentialType"
+        - name: vct
+          in: query
+          description: SD-JWT VC type value.
+          schema:
+            type: string
+        - name: doctype
+          in: query
+          description: ISO mdoc doctype.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ClaimPath"
+        - name: wrp_id
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Entitlement"
+        - name: purpose_q
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/At"
+        - $ref: "#/components/parameters/UpdatedSince"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated requested credential results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestedCredentialSearchResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /provided-attestations:
+    get:
+      operationId: searchProvidedAttestations
+      tags: [Provided Attestations]
+      summary: Search provided attestations
+      description: Searches attestations that registered entities intend to issue.
+      parameters:
+        - $ref: "#/components/parameters/CredentialFormat"
+        - name: vct
+          in: query
+          schema:
+            type: string
+        - name: doctype
+          in: query
+          schema:
+            type: string
+        - name: schema_uri
+          in: query
+          schema:
+            type: string
+            format: uri
+        - name: provider_wrp_id
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Entitlement"
+        - name: country
+          in: query
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 2
+        - $ref: "#/components/parameters/At"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated provided attestation results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProvidedAttestationSearchResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /certificates:
+    get:
+      operationId: searchCertificates
+      tags: [Certificates]
+      summary: Search certificates
+      description: Searches current and historic Access Certificates and Registration Certificates.
+      parameters:
+        - name: wrp_id
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/CertificateType"
+        - $ref: "#/components/parameters/CertificateStatus"
+        - name: serial_number
+          in: query
+          schema:
+            type: string
+        - name: subject_identifier
+          in: query
+          schema:
+            type: string
+        - name: issuer
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ValidAt"
+        - name: issued_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: issued_before
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/At"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated certificate results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateSearchResponse"
+              examples:
+                certificateHistory:
+                  summary: Certificate history
+                  value:
+                    data:
+                      - certificate_id: "cert_wrprc_A"
+                        certificate_type: "registration_certificate"
+                        wrp_id: "wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                        certificate_fingerprint: "sha-256:abc..."
+                        status: "revoked"
+                        issued_at: "2025-01-10T10:00:00Z"
+                        valid_from: "2025-01-10T10:00:00Z"
+                        valid_until: "2026-01-10T10:00:00Z"
+                        revoked_at: "2025-08-01T12:00:00Z"
+                        links:
+                          self: "/certificates/cert_wrprc_A"
+                          payload: "/certificates/cert_wrprc_A/payload"
+                          status: "/certificates/cert_wrprc_A/status"
+                    pagination:
+                      limit: 25
+                      next_cursor: null
+        default:
+          $ref: "#/components/responses/Error"
+
+  /certificates/{certificate_id}:
+    get:
+      operationId: getCertificate
+      tags: [Certificates]
+      summary: Get certificate detail
+      description: Returns certificate metadata and links to payload, status, events, and statements.
+      parameters:
+        - $ref: "#/components/parameters/CertificateId"
+      responses:
+        "200":
+          description: Certificate detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /certificates/{certificate_id}/payload:
+    get:
+      operationId: getCertificatePayload
+      tags: [Certificates]
+      summary: Get certificate payload
+      description: |
+        Returns the encoded certificate payload. For Access Certificates this may be an X.509 certificate or chain.
+        For Registration Certificates this may be a signed JWT/JWS object according to the applicable certificate profile.
+      parameters:
+        - $ref: "#/components/parameters/CertificateId"
+      responses:
+        "200":
+          description: Certificate payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificatePayload"
+            application/jose:
+              schema:
+                type: string
+                description: Compact JWS/JWT representation where applicable.
+            application/jose+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/JwsFlattened"
+                  - $ref: "#/components/schemas/JwsGeneral"
+            application/pem-certificate-chain:
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Error"
+
+  /certificates/{certificate_id}/status:
+    get:
+      operationId: getCertificateStatus
+      tags: [Certificates]
+      summary: Get certificate status
+      description: Returns current and historic status metadata for a certificate.
+      parameters:
+        - $ref: "#/components/parameters/CertificateId"
+        - $ref: "#/components/parameters/At"
+      responses:
+        "200":
+          description: Certificate status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateStatusDetail"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /certificate-events:
+    get:
+      operationId: searchCertificateEvents
+      tags: [Certificate Events]
+      summary: Search certificate events
+      description: |
+        Returns replayable certificate-derived transaction events. This is the primary endpoint for external actors that
+        want to reconstruct their own monitor database.
+
+        Results are ordered by monotonically increasing `sequence_number` and `published_at`.
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - name: wrp_id
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/CertificateType"
+        - $ref: "#/components/parameters/CertificateEventType"
+        - $ref: "#/components/parameters/CertificateStatus"
+        - name: include_payload
+          in: query
+          description: Whether to include embedded certificate payload summaries. Implementations may cap this.
+          schema:
+            type: boolean
+            default: false
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated certificate events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateEventSearchResponse"
+              examples:
+                changesSinceTimestamp:
+                  summary: Retrieve changes since a timestamp
+                  value:
+                    data:
+                      - event_id: "evt_0000010025"
+                        sequence_number: 10025
+                        event_type: "registration_certificate_issued"
+                        occurred_at: "2025-01-10T10:00:00Z"
+                        published_at: "2025-01-10T10:00:05Z"
+                        wrp_id: "wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                        certificate_id: "cert_wrprc_A"
+                        certificate_type: "registration_certificate"
+                        certificate_fingerprint: "sha-256:abc..."
+                        new_status: "active"
+                        links:
+                          certificate: "/certificates/cert_wrprc_A"
+                          payload: "/certificates/cert_wrprc_A/payload"
+                          signed_statement: "/statements/stmt_evt_0000010025"
+                    pagination:
+                      limit: 100
+                      next_cursor: "eyJzZXEiOjEwMDI1fQ"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /certificate-events/{event_id}:
+    get:
+      operationId: getCertificateEvent
+      tags: [Certificate Events]
+      summary: Get certificate event
+      description: Returns one certificate event.
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      responses:
+        "200":
+          description: Certificate event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateEvent"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /statements:
+    get:
+      operationId: searchStatements
+      tags: [Statements]
+      summary: Search signed statements
+      description: Searches authoritative signed registrar statements.
+      parameters:
+        - name: statement_type
+          in: query
+          schema:
+            $ref: "#/components/schemas/StatementType"
+        - name: wrp_id
+          in: query
+          schema:
+            type: string
+        - name: intended_use_id
+          in: query
+          schema:
+            type: string
+        - name: certificate_id
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/At"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Paginated signed statement summaries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatementSearchResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /statements/{statement_id}:
+    get:
+      operationId: getStatementEnvelope
+      tags: [Statements]
+      summary: Get readable signed statement envelope
+      description: |
+        Returns a developer-friendly JSON envelope containing the decoded payload and the authoritative JWS object.
+
+        Verifiers must treat the embedded JWS as authoritative and verify that the decoded JWS payload matches the
+        exposed decoded payload.
+      parameters:
+        - $ref: "#/components/parameters/StatementId"
+      responses:
+        "200":
+          description: Readable signed statement envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedStatementEnvelope"
+              examples:
+                statement:
+                  summary: Readable signed statement
+                  value:
+                    statement_id: "stmt_age_18_alcohol"
+                    statement_type: "intended_use_statement"
+                    payload:
+                      statement_id: "stmt_age_18_alcohol"
+                      wrp_id: "wrp_DE_LEIXG-529900T8BM49AURSDO55"
+                      intended_use_id: "iu_age_18_alcohol"
+                      issued_at: "2025-01-10T10:00:00Z"
+                      purpose:
+                        - lang: "en-US"
+                          value: "Age verification for alcohol purchase"
+                      requested_credentials:
+                        - format: "dc+sd-jwt"
+                          meta:
+                            vct_values: ["urn:eudi:pid:de:1"]
+                          claims:
+                            - path: ["age_equal_or_over", "18"]
+                    signature:
+                      serialization: "jws-json-flattened"
+                      jws:
+                        payload: "eyJzdGF0ZW1lbnRfaWQiOiJzdG10X2FnZV8xOF9hbGNvaG9sIn0"
+                        protected: "eyJhbGciOiJFUzI1NiIsImtpZCI6InJlZ2lzdHJhci1rZXktMSJ9"
+                        signature: "MEUCIQD..."
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /statements/{statement_id}/jws:
+    get:
+      operationId: getStatementJws
+      tags: [Statements]
+      summary: Get authoritative JWS JSON Serialization
+      description: |
+        Returns the canonical JWS JSON Serialization object for a signed registrar statement.
+
+        Use Flattened JWS JSON Serialization for one signature or seal. Use General JWS JSON Serialization if multiple
+        signatures or seals are required.
+      parameters:
+        - $ref: "#/components/parameters/StatementId"
+      responses:
+        "200":
+          description: JWS JSON Serialization object.
+          content:
+            application/jose+json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/JwsFlattened"
+                  - $ref: "#/components/schemas/JwsGeneral"
+        default:
+          $ref: "#/components/responses/Error"
+
+  /statistics:
+    get:
+      operationId: getStatistics
+      tags: [Statistics]
+      summary: Get public monitoring statistics
+      description: Optional aggregate statistics for dashboards and public monitoring.
+      parameters:
+        - $ref: "#/components/parameters/At"
+      responses:
+        "200":
+          description: Public monitoring statistics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Statistics"
+        default:
+          $ref: "#/components/responses/Error"
+
+components:
+  parameters:
+    Q:
+      name: q
+      in: query
+      description: Free-text search query.
+      schema:
+        type: string
+    Identifier:
+      name: identifier
+      in: query
+      description: Official or business registration number.
+      schema:
+        type: string
+    IdentifierType:
+      name: identifier_type
+      in: query
+      description: Identifier scheme.
+      schema:
+        $ref: "#/components/schemas/IdentifierType"
+    WrpId:
+      name: wrp_id
+      in: path
+      required: true
+      description: Stable Wallet-Relying Party identifier.
+      schema:
+        type: string
+    IntendedUseId:
+      name: intended_use_id
+      in: path
+      required: true
+      description: Stable canonical intended-use identifier.
+      schema:
+        type: string
+    CertificateId:
+      name: certificate_id
+      in: path
+      required: true
+      description: Stable certificate identifier.
+      schema:
+        type: string
+    EventId:
+      name: event_id
+      in: path
+      required: true
+      description: Stable certificate event identifier.
+      schema:
+        type: string
+    StatementId:
+      name: statement_id
+      in: path
+      required: true
+      description: Stable signed statement identifier.
+      schema:
+        type: string
+    Entitlement:
+      name: entitlement
+      in: query
+      description: Entitlement URI.
+      schema:
+        type: string
+        format: uri
+    SubEntitlement:
+      name: sub_entitlement
+      in: query
+      description: Member-State-defined sub-entitlement URI or identifier.
+      schema:
+        type: string
+    UsesIntermediary:
+      name: uses_intermediary
+      in: query
+      description: Whether the WRP relies on an intermediary.
+      schema:
+        type: boolean
+    IntermediaryIdentifier:
+      name: intermediary_identifier
+      in: query
+      description: Identifier of an associated intermediary.
+      schema:
+        type: string
+    Status:
+      name: status
+      in: query
+      description: WRP status.
+      schema:
+        $ref: "#/components/schemas/WrpStatus"
+    IntendedUseStatus:
+      name: status
+      in: query
+      description: Intended-use lifecycle status.
+      schema:
+        $ref: "#/components/schemas/IntendedUseStatus"
+    CertificateStatus:
+      name: status
+      in: query
+      description: Certificate status.
+      schema:
+        $ref: "#/components/schemas/CertificateStatus"
+    CertificateType:
+      name: certificate_type
+      in: query
+      description: Certificate type.
+      schema:
+        $ref: "#/components/schemas/CertificateType"
+    CertificateEventType:
+      name: event_type
+      in: query
+      description: Certificate event type.
+      schema:
+        $ref: "#/components/schemas/CertificateEventType"
+    CredentialFormat:
+      name: credential_format
+      in: query
+      description: Requested credential format.
+      schema:
+        $ref: "#/components/schemas/CredentialFormat"
+    CredentialType:
+      name: credential_type
+      in: query
+      description: Credential type, for example SD-JWT VC `vct` or ISO mdoc `doctype`.
+      schema:
+        type: string
+    ClaimPath:
+      name: claim_path
+      in: query
+      description: Claim path within a credential type. Dot notation may be used in query parameters, for example `age_equal_or_over.18`.
+      schema:
+        type: string
+    At:
+      name: at
+      in: query
+      description: Point-in-time reconstruction timestamp. If set, the response reflects the public monitor state at this time.
+      schema:
+        type: string
+        format: date-time
+    UpdatedSince:
+      name: updated_since
+      in: query
+      description: Only include resources updated since this timestamp.
+      schema:
+        type: string
+        format: date-time
+    RegisteredFrom:
+      name: registered_from
+      in: query
+      description: Include intended uses first registered at or after this timestamp.
+      schema:
+        type: string
+        format: date-time
+    RegisteredTo:
+      name: registered_to
+      in: query
+      description: Include intended uses first registered before or at this timestamp.
+      schema:
+        type: string
+        format: date-time
+    RevokedFrom:
+      name: revoked_from
+      in: query
+      description: Include intended uses revoked at or after this timestamp.
+      schema:
+        type: string
+        format: date-time
+    RevokedTo:
+      name: revoked_to
+      in: query
+      description: Include intended uses revoked before or at this timestamp.
+      schema:
+        type: string
+        format: date-time
+    From:
+      name: from
+      in: query
+      description: Start timestamp for event interval queries.
+      schema:
+        type: string
+        format: date-time
+    To:
+      name: to
+      in: query
+      description: End timestamp for event interval queries.
+      schema:
+        type: string
+        format: date-time
+    ValidAt:
+      name: valid_at
+      in: query
+      description: Include certificates valid at this timestamp.
+      schema:
+        type: string
+        format: date-time
+    Limit:
+      name: limit
+      in: query
+      description: Maximum number of results to return.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 25
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque pagination cursor.
+      schema:
+        type: string
+
+  responses:
+    Error:
+      description: Error response.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            type: "https://registrar.example.gov/problems/not-found"
+            title: "Not found"
+            status: 404
+            detail: "The requested resource was not found."
+            instance: "/requested/resource"
+
+  schemas:
+    RegistryMetadata:
+      type: object
+      required:
+        - registrar_id
+        - country
+        - api_base_url
+        - openapi_url
+        - api_version
+        - latest_registry_update
+        - supported_signing_algorithms
+        - supported_statement_serializations
+        - jwks_uri
+      properties:
+        registrar_id:
+          type: string
+        country:
+          type: string
+          minLength: 2
+          maxLength: 2
+        api_base_url:
+          type: string
+          format: uri
+        openapi_url:
+          type: string
+          format: uri
+        human_readable_registry_url:
+          type: string
+          format: uri
+        api_version:
+          type: string
+        latest_registry_update:
+          type: string
+          format: date-time
+        supported_signing_algorithms:
+          type: array
+          items:
+            type: string
+        supported_statement_serializations:
+          type: array
+          items:
+            $ref: "#/components/schemas/JwsSerialization"
+        supported_credential_formats:
+          type: array
+          items:
+            $ref: "#/components/schemas/CredentialFormat"
+        entitlement_namespace_uri:
+          type: string
+          format: uri
+        jwks_uri:
+          type: string
+          format: uri
+        certificate_policy_uri:
+          type: string
+          format: uri
+
+    IdentifierType:
+      type: string
+      enum:
+        - EUID
+        - LEI
+        - VAT
+        - EORI
+        - NTR
+        - TaxRef
+        - national_register_number
+        - other
+
+    Identifier:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          $ref: "#/components/schemas/IdentifierType"
+        value:
+          type: string
+        scheme_uri:
+          type: string
+          format: uri
+
+    MultiLangString:
+      type: object
+      required: [lang, value]
+      properties:
+        lang:
+          type: string
+          description: BCP 47 language tag.
+          examples: ["en-US", "de-DE"]
+        value:
+          type: string
+
+    Links:
+      type: object
+      additionalProperties:
+        type: string
+        format: uri-reference
+
+    Pagination:
+      type: object
+      required: [limit]
+      properties:
+        limit:
+          type: integer
+        next_cursor:
+          type: [string, "null"]
+        total_count:
+          type: integer
+          description: Optional. Only present if efficiently available.
+
+    WrpStatus:
+      type: string
+      enum: [active, suspended, cancelled, expired, historic]
+
+    IntendedUseStatus:
+      type: string
+      enum: [active, revoked, expired, suspended, cancelled, superseded, historic]
+
+    CertificateType:
+      type: string
+      enum: [access_certificate, registration_certificate]
+
+    CertificateStatus:
+      type: string
+      enum: [active, revoked, expired, suspended, cancelled, superseded, historic]
+
+    CertificateEventType:
+      type: string
+      enum:
+        - access_certificate_issued
+        - access_certificate_revoked
+        - access_certificate_expired
+        - registration_certificate_issued
+        - registration_certificate_revoked
+        - registration_certificate_expired
+        - registration_certificate_superseded
+        - registration_suspended
+        - registration_cancelled
+        - registration_reinstated
+
+    CredentialFormat:
+      type: string
+      enum:
+        - dc+sd-jwt
+        - mso_mdoc
+        - jwt_vc_json
+        - ldp_vc
+        - other
+
+    WalletRelyingPartySummary:
+      type: object
+      required: [wrp_id, display_name, country, status, links]
+      properties:
+        wrp_id:
+          type: string
+        display_name:
+          type: string
+        legal_name:
+          type: string
+        trade_name:
+          type: string
+        country:
+          type: string
+        identifiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Identifier"
+        entitlements:
+          type: array
+          items:
+            type: string
+            format: uri
+        status:
+          $ref: "#/components/schemas/WrpStatus"
+        intended_use_count:
+          type: integer
+        active_intended_use_count:
+          type: integer
+        links:
+          $ref: "#/components/schemas/Links"
+
+    WalletRelyingParty:
+      allOf:
+        - $ref: "#/components/schemas/WalletRelyingPartySummary"
+        - type: object
+          properties:
+            info_uri:
+              type: string
+              format: uri
+            support_uri:
+              type: array
+              items:
+                type: string
+                format: uri
+            privacy_policy:
+              type: string
+              format: uri
+            service_descriptions:
+              type: array
+              items:
+                $ref: "#/components/schemas/MultiLangString"
+            is_public_sector_body:
+              type: boolean
+            sub_entitlements:
+              type: array
+              items:
+                type: string
+            provided_attestations:
+              type: array
+              items:
+                $ref: "#/components/schemas/ProvidedAttestation"
+            intermediary:
+              $ref: "#/components/schemas/IntermediaryReference"
+            supervisory_authority:
+              $ref: "#/components/schemas/SupervisoryAuthority"
+            first_registered_at:
+              type: string
+              format: date-time
+            last_updated_at:
+              type: string
+              format: date-time
+            current_access_certificate_ids:
+              type: array
+              items:
+                type: string
+            current_registration_certificate_ids:
+              type: array
+              items:
+                type: string
+
+    SupervisoryAuthority:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        uri:
+          type: string
+          format: uri
+        form_uri:
+          type: string
+          format: uri
+
+    IntermediaryReference:
+      type: object
+      required: [identifier]
+      properties:
+        wrp_id:
+          type: string
+        identifier:
+          type: string
+        name:
+          type: string
+        links:
+          $ref: "#/components/schemas/Links"
+
+    IntendedUseSummary:
+      type: object
+      required:
+        - intended_use_id
+        - intended_use_fingerprint
+        - wrp_id
+        - purpose
+        - requested_credentials
+        - status
+        - first_registered_at
+        - links
+      properties:
+        intended_use_id:
+          type: string
+        intended_use_fingerprint:
+          type: string
+          description: Stable fingerprint over the canonicalized intended-use content, excluding certificate-specific metadata.
+          examples: ["sha-256:9ae1..."]
+        wrp_id:
+          type: string
+        wrp_display_name:
+          type: string
+        purpose:
+          type: array
+          items:
+            $ref: "#/components/schemas/MultiLangString"
+        requested_credentials:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequestedCredential"
+        requested_claims:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequestedClaim"
+        privacy_policy:
+          type: string
+          format: uri
+        entitlements:
+          type: array
+          items:
+            type: string
+            format: uri
+        sub_entitlements:
+          type: array
+          items:
+            type: string
+        intermediary:
+          $ref: "#/components/schemas/IntermediaryReference"
+        status:
+          $ref: "#/components/schemas/IntendedUseStatus"
+        first_registered_at:
+          type: string
+          format: date-time
+        last_confirmed_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+        valid_from:
+          type: string
+          format: date-time
+        valid_until:
+          type: [string, "null"]
+          format: date-time
+        supporting_certificate_count:
+          type: integer
+        current_supporting_certificate_count:
+          type: integer
+        links:
+          $ref: "#/components/schemas/Links"
+
+    IntendedUse:
+      allOf:
+        - $ref: "#/components/schemas/IntendedUseSummary"
+        - type: object
+          properties:
+            supporting_certificate_ids:
+              type: array
+              items:
+                type: string
+            current_supporting_certificate_ids:
+              type: array
+              items:
+                type: string
+            revocation_evidence:
+              $ref: "#/components/schemas/RevocationEvidence"
+            supersedes_intended_use_id:
+              type: string
+            superseded_by_intended_use_id:
+              type: string
+
+    RequestedCredential:
+      type: object
+      required: [format, meta]
+      properties:
+        format:
+          $ref: "#/components/schemas/CredentialFormat"
+        meta:
+          type: object
+          description: Credential-format-specific metadata, for example `vct_values` for SD-JWT VC or `doctype_value` for mdoc.
+          additionalProperties: true
+          examples:
+            - vct_values: ["urn:eudi:pid:de:1"]
+            - doctype_value: "eu.europa.ec.eudi.pid.1"
+        claims:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequestedClaim"
+
+    RequestedClaim:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: array
+          items:
+            type: string
+          examples:
+            - ["age_equal_or_over", "18"]
+            - ["age_over_18"]
+        normalized_path:
+          type: string
+          description: Dot-notation path for indexing and search.
+          examples: ["age_equal_or_over.18"]
+        claim_name:
+          type: string
+        value:
+          description: Optional claim value or selector, if applicable.
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: "null"
+
+    ProvidedAttestation:
+      type: object
+      required: [format, meta]
+      properties:
+        format:
+          $ref: "#/components/schemas/CredentialFormat"
+        meta:
+          type: object
+          additionalProperties: true
+        schema_uri:
+          type: string
+          format: uri
+        provider_wrp_id:
+          type: string
+        links:
+          $ref: "#/components/schemas/Links"
+
+    CertificateSummary:
+      type: object
+      required:
+        - certificate_id
+        - certificate_type
+        - wrp_id
+        - certificate_fingerprint
+        - status
+        - issued_at
+        - links
+      properties:
+        certificate_id:
+          type: string
+        certificate_type:
+          $ref: "#/components/schemas/CertificateType"
+        wrp_id:
+          type: string
+        certificate_fingerprint:
+          type: string
+        serial_number:
+          type: string
+        subject_identifier:
+          type: string
+        issuer:
+          type: string
+        status:
+          $ref: "#/components/schemas/CertificateStatus"
+        issued_at:
+          type: string
+          format: date-time
+        valid_from:
+          type: string
+          format: date-time
+        valid_until:
+          type: string
+          format: date-time
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+        status_list_uri:
+          type: string
+          format: uri
+        status_list_index:
+          type: integer
+        links:
+          $ref: "#/components/schemas/Links"
+
+    CertificateDetail:
+      allOf:
+        - $ref: "#/components/schemas/CertificateSummary"
+        - type: object
+          properties:
+            certificate_policy:
+              type: string
+              format: uri
+            policy_id:
+              type: array
+              items:
+                type: string
+            related_intended_use_ids:
+              type: array
+              items:
+                type: string
+            payload_media_type:
+              type: string
+            status_history:
+              type: array
+              items:
+                $ref: "#/components/schemas/CertificateStatusEvent"
+
+    CertificatePayload:
+      type: object
+      properties:
+        certificate_id:
+          type: string
+        certificate_type:
+          $ref: "#/components/schemas/CertificateType"
+        media_type:
+          type: string
+        encoded:
+          type: string
+          description: Encoded certificate payload, for example PEM, compact JWS, base64 DER, or another agreed representation.
+        jws:
+          oneOf:
+            - $ref: "#/components/schemas/JwsFlattened"
+            - $ref: "#/components/schemas/JwsGeneral"
+        decoded_payload:
+          type: object
+          additionalProperties: true
+
+    CertificateStatusDetail:
+      type: object
+      required: [certificate_id, status]
+      properties:
+        certificate_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/CertificateStatus"
+        checked_at:
+          type: string
+          format: date-time
+        status_list_uri:
+          type: string
+          format: uri
+        status_list_index:
+          type: integer
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/CertificateStatusEvent"
+
+    CertificateStatusEvent:
+      type: object
+      required: [status, occurred_at]
+      properties:
+        status:
+          $ref: "#/components/schemas/CertificateStatus"
+        occurred_at:
+          type: string
+          format: date-time
+        published_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
+
+    CertificateEvent:
+      type: object
+      required:
+        - event_id
+        - sequence_number
+        - event_type
+        - occurred_at
+        - published_at
+        - wrp_id
+        - certificate_id
+        - certificate_type
+        - certificate_fingerprint
+        - links
+      properties:
+        event_id:
+          type: string
+        sequence_number:
+          type: integer
+          minimum: 0
+        event_type:
+          $ref: "#/components/schemas/CertificateEventType"
+        occurred_at:
+          type: string
+          format: date-time
+        published_at:
+          type: string
+          format: date-time
+        wrp_id:
+          type: string
+        certificate_id:
+          type: string
+        certificate_type:
+          $ref: "#/components/schemas/CertificateType"
+        certificate_fingerprint:
+          type: string
+        previous_status:
+          $ref: "#/components/schemas/CertificateStatus"
+        new_status:
+          $ref: "#/components/schemas/CertificateStatus"
+        status_list_uri:
+          type: string
+          format: uri
+        status_list_index:
+          type: integer
+        source:
+          type: string
+        affected_intended_use_ids:
+          type: array
+          items:
+            type: string
+        links:
+          $ref: "#/components/schemas/Links"
+
+    RevocationEvidence:
+      type: object
+      properties:
+        certificate_event_id:
+          type: string
+        certificate_id:
+          type: string
+        status_list_uri:
+          type: string
+          format: uri
+        status_list_index:
+          type: integer
+        revoked_at:
+          type: string
+          format: date-time
+        reason:
+          type: string
+
+    StatementType:
+      type: string
+      enum:
+        - wrp_statement
+        - intended_use_statement
+        - certificate_event_statement
+        - certificate_history_statement
+        - registry_snapshot_statement
+
+    StatementSummary:
+      type: object
+      required: [statement_id, statement_type, issued_at, links]
+      properties:
+        statement_id:
+          type: string
+        statement_type:
+          $ref: "#/components/schemas/StatementType"
+        wrp_id:
+          type: string
+        intended_use_id:
+          type: string
+        certificate_id:
+          type: string
+        issued_at:
+          type: string
+          format: date-time
+        payload_hash:
+          type: string
+        jws_serialization:
+          $ref: "#/components/schemas/JwsSerialization"
+        links:
+          $ref: "#/components/schemas/Links"
+
+    SignedStatementEnvelope:
+      type: object
+      required: [statement_id, statement_type, payload, signature]
+      properties:
+        statement_id:
+          type: string
+        statement_type:
+          $ref: "#/components/schemas/StatementType"
+        payload:
+          type: object
+          additionalProperties: true
+          description: Decoded JSON payload for developer convenience.
+        signature:
+          $ref: "#/components/schemas/StatementSignature"
+
+    StatementSignature:
+      type: object
+      required: [serialization, jws]
+      properties:
+        serialization:
+          $ref: "#/components/schemas/JwsSerialization"
+        jws:
+          oneOf:
+            - $ref: "#/components/schemas/JwsFlattened"
+            - $ref: "#/components/schemas/JwsGeneral"
+
+    JwsSerialization:
+      type: string
+      enum: [jws-json-flattened, jws-json-general]
+
+    JwsFlattened:
+      type: object
+      description: Flattened JWS JSON Serialization.
+      required: [payload, protected, signature]
+      properties:
+        payload:
+          type: string
+          description: Base64url-encoded payload.
+        protected:
+          type: string
+          description: Base64url-encoded protected header.
+        header:
+          type: object
+          additionalProperties: true
+        signature:
+          type: string
+          description: Base64url-encoded signature.
+
+    JwsGeneral:
+      type: object
+      description: General JWS JSON Serialization.
+      required: [payload, signatures]
+      properties:
+        payload:
+          type: string
+          description: Base64url-encoded payload.
+        signatures:
+          type: array
+          items:
+            type: object
+            required: [protected, signature]
+            properties:
+              protected:
+                type: string
+              header:
+                type: object
+                additionalProperties: true
+              signature:
+                type: string
+
+    Statistics:
+      type: object
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        at:
+          type: string
+          format: date-time
+        wrp_count:
+          type: integer
+        active_wrp_count:
+          type: integer
+        intended_use_count:
+          type: integer
+        active_intended_use_count:
+          type: integer
+        certificate_count:
+          type: integer
+        counts_by_entitlement:
+          type: object
+          additionalProperties:
+            type: integer
+        most_requested_credential_types:
+          type: array
+          items:
+            type: object
+            properties:
+              credential_type:
+                type: string
+              count:
+                type: integer
+        most_requested_claims:
+          type: array
+          items:
+            type: object
+            properties:
+              claim_path:
+                type: string
+              count:
+                type: integer
+
+    WalletRelyingPartySearchResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/WalletRelyingPartySummary"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    IntendedUseSearchResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/IntendedUseSummary"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    CertificateSearchResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CertificateSummary"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    CertificateEventSearchResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CertificateEvent"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    StatementSearchResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatementSummary"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    RequestedCredentialSearchResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            required: [wrp_id, intended_use_id, requested_credential, links]
+            properties:
+              wrp_id:
+                type: string
+              wrp_display_name:
+                type: string
+              intended_use_id:
+                type: string
+              purpose:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MultiLangString"
+              requested_credential:
+                $ref: "#/components/schemas/RequestedCredential"
+              links:
+                $ref: "#/components/schemas/Links"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    ProvidedAttestationSearchResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProvidedAttestation"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    ErrorResponse:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+        invalid_params:
+          type: array
+          items:
+            type: object
+            required: [name, reason]
+            properties:
+              name:
+                type: string
+              reason:
+                type: string
