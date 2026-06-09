@@ -14,6 +14,10 @@ The design goal is transparency and monitoring based on certificate-derived publ
   - Reference source material used as inputs.
 - `docker-compose.yml`
   - Local Swagger UI setup to preview the OpenAPI file.
+- `docs/index.html`
+  - Static Swagger UI entry page used for GitHub Pages publishing.
+- `.github/workflows/pages-swagger.yml`
+  - CI workflow that validates the OpenAPI spec and deploys Swagger UI to GitHub Pages.
 
 ## Core design choices
 
@@ -40,6 +44,28 @@ From the repository root:
    `docker compose down`
 
 Swagger UI serves `registrar-public-read-api.openapi.yaml` via the volume mount in `docker-compose.yml`.
+
+## GitHub Pages deployment
+
+This repository includes a GitHub Actions workflow that publishes Swagger UI to GitHub Pages.
+
+Workflow file: `.github/workflows/pages-swagger.yml`
+
+What it does:
+
+1. Validates `registrar-public-read-api.openapi.yaml` with `swagger-cli`.
+2. Builds a static site artifact containing:
+  - `docs/index.html`
+  - `registrar-public-read-api.openapi.yaml` (as `openapi.yaml`)
+3. Deploys the artifact to GitHub Pages on pushes to `main`.
+
+Expected URL pattern after Pages is enabled:
+
+`https://<owner>.github.io/<repo>/`
+
+For this repository, that will be:
+
+`https://cre8.github.io/registrar-api/`
 
 ## How to work with this repository
 
